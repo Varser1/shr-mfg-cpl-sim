@@ -22,7 +22,7 @@ exports.createAiPlayer = () => {
         try {
             let account = new Account({isAiAccount: true});
             await account.save();
-            logger.info("accountService.create() created account: " + account.id);
+            logger.info("accountService.createAiPlayer() created AI account: " + account.id);
             resolve(account);
         } catch (e) {
             reject(e);
