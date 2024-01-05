@@ -4,6 +4,7 @@ exports.Provider = Provider;
 
 const serviceService = require("./Service");
 const serviceConsumer = require("./Consumer");
+const serviceAi = require("./Ai");
 
 const logger = require('../utils/logger');
 
@@ -36,11 +37,14 @@ exports.offerDirectReceive = (offerDirect) => {
             //Reject if offer not in state MARKET
             if (offerDirect.state !== "MARKET") throw ("Offer not in state MARKET");
             //Get provider
-            let provider = await Provider.findOne({account: offerDirect.buyer});
+            let provider = await Provider.findOne({account: offerDirect.buyer}).populate('account').exec();
             //Reject if provider not found
             if (!provider) throw ("Provider not found");
 
-            let decision = await decisionOfferDirect(provider, offerDirect);
+            const decision = provider.account.isAiAccount ? 
+                await serviceAi.makeOfferDecisionWithChatGpt(provider, offerDirect) 
+                : await decisionOfferDirect(provider, offerDirect);
+    
             switch (decision) {
                 case "accept":{
                     offerDirect = await serviceConsumer.offerDirectAccepted(offerDirect);
@@ -71,32 +75,29 @@ exports.offerDirectReceive = (offerDirect) => {
     })
 }
 
+const decisionOfferDirect = async (provider, offerDirect) => {
+    try {
+        logger.silly(`serviceProvider.decisionOfferDirect() called with offerDirect: ${offerDirect._id}`);
+        // Randomly accept, reject, or postpone offer direct
+        const decision = chooseOutcome(0.5, 0.1, 0.4);
 
-let decisionOfferDirect = (provider, offerDirect) => {
-    return new Promise(async (resolve, reject) => {
-        try {
-            logger.silly("serviceProvider.decisionOfferDirect() called with offerDirect: " + offerDirect._id);
-            // Randomly accept or reject or postpone offer direct
-            let random = Math.random();
-            let decision = chooseOutcome(0.5, 0.1, 0.4);
-            if (decision === "accept"){
-                //Check the availability of the provider capacities
-                //Get current number of services with state ACTIVE
-                let count = await serviceService.Service.countDocuments({provider: provider._id, state: "ACTIVE"});
-                if (count >= provider.servicesLimit) {
-                    logger.silly("serviceProvider.decisionOfferDirect() provider capacity reached: " + provider._id);
-                    decision = "reject";
-                }
+        if (decision === "accept") {
+            // Check the availability of the provider capacities
+            // Get current number of services with state ACTIVE
+            const count = await serviceService.Service.countDocuments({provider: provider._id, state: "ACTIVE"});
+            if (count >= provider.servicesLimit) {
+                logger.silly(`serviceProvider.decisionOfferDirect() provider capacity reached: ${provider._id}`);
+                return "reject";
             }
-            resolve(decision);
-        } catch (e) {
-            logger.error("serviceProvider.decisionOfferDirect() error: " + e);
-            reject(e);
         }
-    })
-}
+        return decision;
+    } catch (e) {
+        logger.error(`serviceProvider.decisionOfferDirect() error: ${e}`);
+        throw e;
+    }
+};
 
-let chooseOutcome = (acceptProbability, rejectProbability, postponeProbability) => {
+const chooseOutcome = (acceptProbability, rejectProbability, postponeProbability) => {
     // Ensure the sum of probabilities is 1
     if (acceptProbability + rejectProbability + postponeProbability !== 1) {
         return 'Error: Probabilities must sum up to 1';
