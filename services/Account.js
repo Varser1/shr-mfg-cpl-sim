@@ -16,3 +16,16 @@ exports.create = () => {
         }
     });
 }
+
+exports.createAiPlayer = () => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            let account = new Account({isAiAccount: true});
+            await account.save();
+            logger.info("accountService.create() created account: " + account.id);
+            resolve(account);
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
