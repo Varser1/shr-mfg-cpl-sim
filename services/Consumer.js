@@ -1,9 +1,11 @@
 const config = require('../config.json');
 const Consumer = require('../models/Consumer');
+
 const emitter = require('../utils/events').eventEmitter;
 
 const serviceService = require("./Service");
 const serviceProvider = require("./Provider");
+
 const serviceOfferDirect = require("./OfferDirect");
 const serviceAccount = require("./Account");
 const logger = require('../utils/logger');
@@ -145,7 +147,6 @@ exports.offerDirectRejected = (offerDirect) => {
             reject(e);
         }
     })
-
 }
 
 exports.offerDirectExpired = (offerDirect) => {
@@ -167,6 +168,38 @@ exports.offerDirectExpired = (offerDirect) => {
             reject(e);
         }
     })
+}
+
+exports.offerToPool = (offerDirect) => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            logger.silly("serviceConsumer.offerToPool() called with offerDirect: " + offerDirect._id);
+            //Reject if offer not defined
+            if (!offerDirect) reject("Offer not defined");
+            //Reject if offer not in state MARKET
+            if (offerDirect.state !== "MARKET") reject("Offer not in state MARKET");
+            //Get consumer of service
+            let consumer = await Consumer.findOne({account: offerDirect.seller});
+            //Reject if consumer not found
+            if (!consumer) reject("Consumer not found to rent service");
+            //Change state of offer direct to MARKET
+            offerDirect.state = "MARKET";
+            await offerDirect.save();
+            logger.verbose("serviceConsumer.offerToPool() offer direct state set to MARKET: " + offerDirect._id);
+            const providers = await serviceProvider.Provider.find({});
+
+            for (provider in providers) {
+                const offer = await serviceProvider.offerFromPoolReceive(offer, provider);
+                if (offer.state = "ACCEPTED") {
+                    break;
+                }
+            }
+            resolve(offerDirect);
+        } catch (e) {
+            reject(e);
+        }
+    })
+
 }
 
 exports.serviceCompleted = (service) => {

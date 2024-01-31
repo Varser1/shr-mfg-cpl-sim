@@ -62,6 +62,11 @@ exports.offerDirectReceive = (offerDirect) => {
                     logger.silly("serviceProvider.offerDirectReceived() rejected offer direct: " + offerDirect._id);
                 }
                     break;
+                case "pool":{
+                    offerDirect = await serviceConsumer.offerToPool(offerDirect);
+                    logger.silly("serviceProvider.offerToPool() offer to pool: " + offerDirect._id);
+                }
+                    break;
                 case "postpone":{
                     logger.silly("serviceProvider.offerDirectReceived() postponed offer direct: " + offerDirect._id);
                 }
@@ -75,11 +80,52 @@ exports.offerDirectReceive = (offerDirect) => {
     })
 }
 
+exports.offerFromPoolReceive = (offerDirect, provider) => {
+    return new Promise(async (resolve, reject) => {
+        try {
+            logger.silly("serviceProvider.offerFromPoolReceive() called with offerDirect: " + offerDirect._id);
+            logger.silly("provider called with offerDirect: " + provider);
+
+            //Reject if offer not defined
+            if (!offerDirect) throw ("Offer not defined");
+            //Reject if offer not in state MARKET
+            if (offerDirect.state !== "MARKET") throw ("Offer not in state MARKET");
+            //Reject if provider not found
+            if (!provider) throw ("Provider not found");
+            offer.buyer = provider.account;
+            const decision = await decisionOfferPool(provider, offerDirect);
+    
+            switch (decision) {
+                case "accept":{
+                    offerDirect = await serviceConsumer.offerDirectAccepted(offerDirect);
+                    logger.silly("serviceProvider.offerDirectReceived() accepted offer direct: " + offerDirect.id);
+                    //Get service
+                    let service = await serviceService.Service.findById(offerDirect.service);
+                    //Commence service
+                    logger.silly("serviceProvider.offerDirectReceived() commence service: " + service.id);
+                    await serviceService.commence(service);
+                    logger.silly("serviceProvider.offerDirectReceived() commenced service: " + service.id);
+                }
+                    break;
+                case "reject":{
+                    offerDirect = await serviceConsumer.offerDirectRejected(offerDirect);
+                    logger.silly("serviceProvider.offerDirectReceived() rejected offer direct: " + offerDirect._id);
+                }
+                    break;    
+            }
+            resolve(offerDirect);
+        } catch (e) {
+            logger.error("serviceProvider.offerDirectReceived() error: " + e);
+            reject(e);
+        }
+    })
+}
+
 const decisionOfferDirect = async (provider, offerDirect) => {
     try {
         logger.silly(`serviceProvider.decisionOfferDirect() called with offerDirect: ${offerDirect._id}`);
         // Randomly accept, reject, or postpone offer direct
-        const decision = chooseOutcome(0.5, 0.1, 0.4);
+        const decision = chooseOutcome(0.5, 0.2, 0.1, 0.2);
 
         if (decision === "accept") {
             // Check the availability of the provider capacities
@@ -97,9 +143,31 @@ const decisionOfferDirect = async (provider, offerDirect) => {
     }
 };
 
-const chooseOutcome = (acceptProbability, rejectProbability, postponeProbability) => {
+const decisionOfferPool = async (provider, offerDirect) => {
+    try {
+        logger.silly(`serviceProvider.decisionOfferPool() called with offerDirect: ${offerDirect._id}`);
+        // Randomly accept, reject, or postpone offer from pool
+        const decision = chooseOutcome(0.5, 0.5, 0, 0);
+
+        if (decision === "accept") {
+            // Check the availability of the provider capacities
+            // Get current number of services with state ACTIVE
+            const count = await serviceService.Service.countDocuments({provider: provider._id, state: "ACTIVE"});
+            if (count >= provider.servicesLimit) {
+                logger.silly(`serviceProvider.decisionOfferDirect() provider capacity reached: ${provider._id}`);
+                return "reject";
+            }
+        }
+        return decision;
+    } catch (e) {
+        logger.error(`serviceProvider.decisionOfferPool() error: ${e}`);
+        throw e;
+    }
+};
+
+const chooseOutcome = (acceptProbability, rejectProbability, postponeProbability, poolProbability) => {
     // Ensure the sum of probabilities is 1
-    if (acceptProbability + rejectProbability + postponeProbability !== 1) {
+    if (acceptProbability + rejectProbability + postponeProbability + poolProbability !== 1) {
         return 'Error: Probabilities must sum up to 1';
     }
 
@@ -111,7 +179,10 @@ const chooseOutcome = (acceptProbability, rejectProbability, postponeProbability
         return 'accept';
     } else if (randomNumber < acceptProbability + rejectProbability) {
         return 'reject';
-    } else {
+    } else if (randomNumber < acceptProbability + rejectProbability + postponeProbability) {
         return 'postpone';
+    } else {
+        return 'pool';
     }
 }
+
